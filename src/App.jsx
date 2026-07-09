@@ -37,13 +37,14 @@ const createDeck = () => {
   return deck;
 };
 
+// Official Skyjo card colors
 const cardStyle = (value) => {
   if (value === null) return {};
-  if (value < 0) return { backgroundColor: '#39466B', color: '#FCFBF9' };
-  if (value === 0) return { backgroundColor: '#8FB4C9', color: '#212D19' };
-  if (value <= 4) return { backgroundColor: '#688666', color: '#FCFBF9' };
-  if (value <= 8) return { backgroundColor: '#C79057', color: '#212D19' };
-  return { backgroundColor: '#9C3F22', color: '#FCFBF9' };
+  if (value < 0) return { backgroundColor: '#2B3990', color: '#FFFFFF' }; // dark blue
+  if (value === 0) return { backgroundColor: '#6BC5E8', color: '#1A1A2E' }; // light blue
+  if (value <= 4) return { backgroundColor: '#7AB648', color: '#FFFFFF' }; // green
+  if (value <= 8) return { backgroundColor: '#F5D130', color: '#4A3B00' }; // yellow
+  return { backgroundColor: '#D9302C', color: '#FFFFFF' }; // red
 };
 
 const sumGrid = (grid) => grid.reduce((s, v) => (v === null ? s : s + v), 0);

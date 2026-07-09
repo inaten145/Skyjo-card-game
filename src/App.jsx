@@ -21,6 +21,7 @@ import './index.css';
 const COLS = 4;
 const ROWS = 3;
 const CELLS = COLS * ROWS;
+const PAUSE_MS = 1500; // pause after a flip so everyone can see the result
 
 const createDeck = () => {
   const deck = [];
@@ -37,22 +38,21 @@ const createDeck = () => {
   return deck;
 };
 
-// Official Skyjo card colors
-const cardStyle = (value) => {
-  if (value === null) return {};
-  if (value < 0) return { backgroundColor: '#2B3990', color: '#FFFFFF' }; // dark blue
-  if (value === 0) return { backgroundColor: '#6BC5E8', color: '#1A1A2E' }; // light blue
-  if (value <= 4) return { backgroundColor: '#7AB648', color: '#FFFFFF' }; // green
-  if (value <= 8) return { backgroundColor: '#F5D130', color: '#4A3B00' }; // yellow
-  return { backgroundColor: '#D9302C', color: '#FFFFFF' }; // red
+// Official Skyjo card colors with gradient pairs for a realistic finish
+const cardPalette = (value) => {
+  if (value < 0) return { light: '#3D4DB7', base: '#2B3990', dark: '#1F2A6E', text: '#FFFFFF' };
+  if (value === 0) return { light: '#8AD4F0', base: '#6BC5E8', dark: '#4FAAD0', text: '#123047' };
+  if (value <= 4) return { light: '#92C963', base: '#7AB648', dark: '#5F9634', text: '#FFFFFF' };
+  if (value <= 8) return { light: '#F9DE5C', base: '#F5D130', dark: '#D9B516', text: '#4A3B00' };
+  return { light: '#E5524E', base: '#D9302C', dark: '#B02320', text: '#FFFFFF' };
 };
 
 const sumGrid = (grid) => grid.reduce((s, v) => (v === null ? s : s + v), 0);
+const revealedSum = (player) =>
+  player.grid.reduce((s, v, i) => (v !== null && player.revealed[i] ? s + v : s), 0);
 
-const isFinished = (grid, revealed) =>
-  grid.every((v, i) => v === null || revealed[i]);
+const isFinished = (grid, revealed) => grid.every((v, i) => v === null || revealed[i]);
 
-// Three identical revealed cards in a column -> clear the column to discard.
 const applyColumnRule = (grid, revealed, discard) => {
   const g = [...grid];
   const r = [...revealed];
@@ -89,8 +89,291 @@ const ensureDeck = (deckArr, discardArr) => {
   return { deck: deckArr, discard: discardArr };
 };
 
+/* ============================================================
+   DESIGN SYSTEM — Apple-inspired: white, clean lines, realistic cards
+   ============================================================ */
+
+const T = {
+  pageBg: '#F5F5F7',
+  panel: '#FFFFFF',
+  ink: '#1D1D1F',
+  gray: '#86868B',
+  hairline: '#D2D2D7',
+  accent: '#0071E3',
+  green: '#34C759',
+  font: "-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif",
+};
+
+const pageStyle = {
+  backgroundColor: T.pageBg,
+  minHeight: '100vh',
+  fontFamily: T.font,
+  color: T.ink,
+};
+
+/* ---------- module-scope components (fixes the one-character input bug) ---------- */
+
+const NameInput = ({ value, onChange, placeholder }) => (
+  <input
+    type="text"
+    value={value}
+    onChange={onChange}
+    placeholder={placeholder}
+    maxLength={16}
+    autoComplete="off"
+    className="w-full py-3.5 px-4 rounded-xl text-[17px] outline-none transition-shadow"
+    style={{
+      backgroundColor: '#FFFFFF',
+      border: `1px solid ${T.hairline}`,
+      color: T.ink,
+      fontFamily: T.font,
+    }}
+    onFocus={(e) => (e.target.style.boxShadow = `0 0 0 3px rgba(0,113,227,0.25)`)}
+    onBlur={(e) => (e.target.style.boxShadow = 'none')}
+  />
+);
+
+const Button = ({ onClick, children, variant = 'primary', disabled }) => {
+  const styles = {
+    primary: { backgroundColor: T.ink, color: '#FFFFFF', border: '1px solid transparent' },
+    secondary: { backgroundColor: '#FFFFFF', color: T.ink, border: `1px solid ${T.hairline}` },
+    accent: { backgroundColor: T.accent, color: '#FFFFFF', border: '1px solid transparent' },
+  };
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className="w-full py-[15px] px-6 rounded-full font-semibold text-[17px] transition hover:opacity-85 active:scale-[0.985] disabled:opacity-40"
+      style={{ ...styles[variant], fontFamily: T.font }}
+    >
+      {children}
+    </button>
+  );
+};
+
+const CardFace = ({ value, revealed, removed, onClick, disabled, highlight, size = 'md' }) => {
+  const sizes = {
+    md: 'w-[54px] h-[76px] md:w-16 md:h-[90px]',
+    sm: 'w-5 h-7',
+  };
+  const numSize = size === 'md' ? 'text-[26px] md:text-3xl' : 'text-[9px]';
+
+  if (removed) {
+    return (
+      <div
+        className={`${sizes[size]} rounded-[10px]`}
+        style={{ border: `1.5px dashed ${T.hairline}`, backgroundColor: 'rgba(0,0,0,0.02)' }}
+      />
+    );
+  }
+
+  const realisticShadow =
+    size === 'md'
+      ? '0 1px 2px rgba(0,0,0,0.14), 0 6px 14px rgba(0,0,0,0.12), 0 12px 28px rgba(0,0,0,0.06)'
+      : '0 1px 2px rgba(0,0,0,0.15)';
+
+  if (!revealed) {
+    return (
+      <button
+        onClick={onClick}
+        disabled={disabled}
+        className={`${sizes[size]} rounded-[10px] relative transition-transform ${
+          !disabled ? 'hover:-translate-y-0.5 active:scale-95 cursor-pointer' : ''
+        }`}
+        style={{
+          background:
+            'linear-gradient(165deg, #FFFFFF 0%, #F4F4F6 60%, #EBEBEF 100%)',
+          border: '1px solid #E3E3E8',
+          boxShadow: highlight
+            ? `0 0 0 3px rgba(0,113,227,0.45), ${realisticShadow}`
+            : realisticShadow,
+        }}
+      >
+        {size === 'md' && (
+          <span
+            className="absolute inset-0 flex items-center justify-center font-bold"
+            style={{ color: '#2B3990', fontSize: 18 }}
+          >
+            ◆
+          </span>
+        )}
+        {/* sheen */}
+        <span
+          className="absolute inset-0 rounded-[10px] pointer-events-none"
+          style={{
+            background:
+              'linear-gradient(180deg, rgba(255,255,255,0.8) 0%, rgba(255,255,255,0) 35%)',
+          }}
+        />
+      </button>
+    );
+  }
+
+  const p = cardPalette(value);
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className={`${sizes[size]} rounded-[10px] relative transition-transform ${
+        !disabled ? 'hover:-translate-y-0.5 active:scale-95 cursor-pointer' : ''
+      }`}
+      style={{
+        background: `linear-gradient(160deg, ${p.light} 0%, ${p.base} 55%, ${p.dark} 100%)`,
+        border: '1px solid rgba(0,0,0,0.08)',
+        boxShadow: realisticShadow,
+      }}
+    >
+      {size === 'md' && (
+        <span
+          className="absolute top-1 left-1.5 font-bold leading-none"
+          style={{ color: p.text, fontSize: 11, opacity: 0.85 }}
+        >
+          {value}
+        </span>
+      )}
+      <span
+        className={`absolute inset-0 flex items-center justify-center font-bold ${numSize}`}
+        style={{
+          color: p.text,
+          textShadow: '0 1px 1px rgba(0,0,0,0.15)',
+          fontFamily: T.font,
+        }}
+      >
+        {value}
+      </span>
+      {/* glossy sheen */}
+      <span
+        className="absolute inset-0 rounded-[10px] pointer-events-none"
+        style={{
+          background:
+            'linear-gradient(180deg, rgba(255,255,255,0.35) 0%, rgba(255,255,255,0.05) 40%, rgba(0,0,0,0.04) 100%)',
+        }}
+      />
+    </button>
+  );
+};
+
+const PlayerGrid = ({ player, interactive, onCellTap, tapMode }) => (
+  <div className="flex justify-center gap-2 md:gap-2.5">
+    {Array.from({ length: COLS }).map((_, col) => (
+      <div key={col} className="flex flex-col gap-2 md:gap-2.5">
+        {Array.from({ length: ROWS }).map((_, row) => {
+          const idx = col * ROWS + row;
+          const removed = player.grid[idx] === null;
+          const revealed = player.revealed[idx];
+          let disabled = !interactive || removed;
+          if (interactive && tapMode === 'reveal' && revealed) disabled = true;
+          return (
+            <CardFace
+              key={idx}
+              value={player.grid[idx]}
+              revealed={revealed}
+              removed={removed}
+              disabled={disabled}
+              highlight={interactive && tapMode === 'reveal' && !revealed}
+              onClick={() => onCellTap && onCellTap(idx)}
+            />
+          );
+        })}
+      </div>
+    ))}
+  </div>
+);
+
+const MiniGrid = ({ player, active }) => (
+  <div
+    className="p-2.5 rounded-2xl"
+    style={{
+      backgroundColor: T.panel,
+      border: `1px solid ${active ? T.accent : '#EBEBEE'}`,
+      boxShadow: active
+        ? '0 0 0 3px rgba(0,113,227,0.15), 0 2px 8px rgba(0,0,0,0.06)'
+        : '0 2px 8px rgba(0,0,0,0.05)',
+    }}
+  >
+    <div className="flex items-center justify-between gap-2 mb-1.5 px-0.5">
+      <p className="text-[11px] font-semibold truncate max-w-[80px]" style={{ color: T.ink }}>
+        {player.name}
+      </p>
+      {active && <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: T.accent }} />}
+    </div>
+    <div className="flex gap-0.5 justify-center">
+      {Array.from({ length: COLS }).map((_, col) => (
+        <div key={col} className="flex flex-col gap-0.5">
+          {Array.from({ length: ROWS }).map((_, row) => {
+            const idx = col * ROWS + row;
+            return (
+              <CardFace
+                key={idx}
+                size="sm"
+                value={player.grid[idx]}
+                revealed={player.revealed[idx]}
+                removed={player.grid[idx] === null}
+                disabled
+              />
+            );
+          })}
+        </div>
+      ))}
+    </div>
+  </div>
+);
+
+// Scoreboard strip: total score + what each player is currently showing
+const ScoreBoard = ({ players, currentIdx }) => (
+  <div className="flex gap-2 justify-center flex-wrap mb-4">
+    {players.map((p, i) => (
+      <div
+        key={i}
+        className="px-3.5 py-2 rounded-xl flex items-center gap-2.5"
+        style={{
+          backgroundColor: T.panel,
+          border: `1px solid ${i === currentIdx ? T.accent : '#EBEBEE'}`,
+          boxShadow: '0 1px 4px rgba(0,0,0,0.04)',
+        }}
+      >
+        {i === currentIdx && (
+          <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: T.accent }} />
+        )}
+        <span className="text-[13px] font-semibold" style={{ color: T.ink }}>
+          {p.name}
+        </span>
+        <span className="text-[13px] font-bold tabular-nums" style={{ color: T.ink }}>
+          {p.score}
+          <span className="font-medium" style={{ color: T.gray }}>
+            {' '}
+            pts
+          </span>
+        </span>
+        <span className="text-[12px] tabular-nums" style={{ color: T.gray }}>
+          showing {revealedSum(p)}
+        </span>
+      </div>
+    ))}
+  </div>
+);
+
+// The table surface the cards sit on
+const TableSurface = ({ children }) => (
+  <div
+    className="rounded-[28px] px-4 py-6 md:px-8 md:py-8"
+    style={{
+      background: 'linear-gradient(180deg, #FFFFFF 0%, #FAFAFB 100%)',
+      border: '1px solid #EBEBEE',
+      boxShadow:
+        'inset 0 1px 0 rgba(255,255,255,0.9), 0 1px 2px rgba(0,0,0,0.04), 0 12px 32px rgba(0,0,0,0.06)',
+    }}
+  >
+    {children}
+  </div>
+);
+
+/* ============================================================
+   MAIN COMPONENT
+   ============================================================ */
+
 const SkyjoGame = () => {
-  const [screen, setScreen] = useState('menu'); // menu | setup | join | lobby | initialReveal | playing | roundEnd | gameEnd
+  const [screen, setScreen] = useState('menu');
   const [playMode, setPlayMode] = useState(null); // 'local' | 'ai' | 'online'
   const [playerCount, setPlayerCount] = useState(2);
   const [soundEnabled, setSoundEnabled] = useState(true);
@@ -98,29 +381,28 @@ const SkyjoGame = () => {
   const [copied, setCopied] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
-  // Shared game state (local engine, mirrored from DB when online)
   const [players, setPlayers] = useState([]);
   const [deck, setDeck] = useState([]);
   const [discard, setDiscard] = useState([]);
   const [currentIdx, setCurrentIdx] = useState(0);
   const [roundNumber, setRoundNumber] = useState(1);
-  const [drawn, setDrawn] = useState(null); // { card, source }
+  const [drawn, setDrawn] = useState(null);
   const [mustReveal, setMustReveal] = useState(false);
   const [finisherIdx, setFinisherIdx] = useState(null);
   const [finalTurnsLeft, setFinalTurnsLeft] = useState(0);
   const [message, setMessage] = useState('');
+  const [pausing, setPausing] = useState(false);
 
-  // Local initial-reveal tracking
   const [revealIdx, setRevealIdx] = useState(0);
   const [revealsLeft, setRevealsLeft] = useState(2);
 
-  // Online-only
   const [gameId, setGameId] = useState(null);
-  const [mySeat, setMySeat] = useState(null); // { idx, id }
+  const [mySeat, setMySeat] = useState(null);
   const [joinTargetId, setJoinTargetId] = useState(null);
   const [busy, setBusy] = useState(false);
 
   const aiTimer = useRef(null);
+  const pauseTimer = useRef(null);
   const pollTimer = useRef(null);
   const unsubscribe = useRef(null);
   const prevTurnRef = useRef(null);
@@ -138,7 +420,7 @@ const SkyjoGame = () => {
         osc.connect(gain);
         gain.connect(ctx.destination);
         const now = ctx.currentTime;
-        gain.gain.setValueAtTime(0.25, now);
+        gain.gain.setValueAtTime(0.2, now);
         gain.gain.exponentialRampToValueAtTime(0.01, now + 0.25);
         if (type === 'turn') {
           osc.frequency.setValueAtTime(620, now);
@@ -164,7 +446,7 @@ const SkyjoGame = () => {
   );
 
   /* ============================================================
-     LOCAL ENGINE (Pass & Play + AI)
+     LOCAL ENGINE
      ============================================================ */
 
   const dealLocalRound = (existingPlayers, round) => {
@@ -199,6 +481,7 @@ const SkyjoGame = () => {
     setRoundNumber(round);
     setRevealIdx(0);
     setRevealsLeft(2);
+    setPausing(false);
     setScreen('initialReveal');
     setMessage(`${newPlayers[0].name}: reveal two cards.`);
   };
@@ -260,7 +543,7 @@ const SkyjoGame = () => {
   };
 
   const localDraw = () => {
-    if (drawn || mustReveal) return;
+    if (drawn || mustReveal || pausing) return;
     const fixed = ensureDeck([...deck], [...discard]);
     if (fixed.deck.length === 0) return;
     const card = fixed.deck.shift();
@@ -272,7 +555,7 @@ const SkyjoGame = () => {
   };
 
   const localTakeDiscard = () => {
-    if (drawn || mustReveal || discard.length === 0) return;
+    if (drawn || mustReveal || pausing || discard.length === 0) return;
     const card = discard[discard.length - 1];
     setDiscard(discard.slice(0, -1));
     setDrawn({ card, source: 'discard' });
@@ -281,7 +564,7 @@ const SkyjoGame = () => {
   };
 
   const localDiscardDrawn = () => {
-    if (!drawn || drawn.source !== 'deck') return;
+    if (!drawn || drawn.source !== 'deck' || pausing) return;
     setDiscard([...discard, drawn.card]);
     setDrawn(null);
     setMustReveal(true);
@@ -290,6 +573,7 @@ const SkyjoGame = () => {
   };
 
   const localCellTap = (cellIdx) => {
+    if (pausing) return;
     const player = players[currentIdx];
     if (player.isAI || player.grid[cellIdx] === null) return;
 
@@ -309,13 +593,16 @@ const SkyjoGame = () => {
     }));
     const newDiscard = [...discard];
     let player = newPlayers[currentIdx];
+    let flippedValue;
 
     if (kind === 'swap') {
       newDiscard.push(player.grid[cellIdx]);
+      flippedValue = swapCard;
       player.grid[cellIdx] = swapCard;
       player.revealed[cellIdx] = true;
       setDrawn(null);
     } else {
+      flippedValue = player.grid[cellIdx];
       player.revealed[cellIdx] = true;
       setMustReveal(false);
     }
@@ -328,7 +615,20 @@ const SkyjoGame = () => {
 
     setPlayers(newPlayers);
     setDiscard(newDiscard);
-    localAdvanceTurn(newPlayers, deck, newDiscard, currentIdx);
+    setMessage(
+      kind === 'swap'
+        ? `${player.name} swapped in a ${flippedValue}.`
+        : `${player.name} revealed a ${flippedValue}.` +
+            (col.removed ? ' Column of three cleared!' : '')
+    );
+
+    // Pause so the flipped card is visible before the turn passes
+    setPausing(true);
+    if (pauseTimer.current) clearTimeout(pauseTimer.current);
+    pauseTimer.current = setTimeout(() => {
+      setPausing(false);
+      localAdvanceTurn(newPlayers, deck, newDiscard, currentIdx);
+    }, PAUSE_MS);
   };
 
   const localAdvanceTurn = (curPlayers, curDeck, curDiscard, justPlayed) => {
@@ -388,7 +688,7 @@ const SkyjoGame = () => {
     let actionMsg;
     if (takeDisc) {
       card = newDiscard.pop();
-      actionMsg = `${player.name} took ${card} from discard`;
+      actionMsg = `${player.name} took the ${card} from discard`;
     } else {
       const fixed = ensureDeck(newDeck, newDiscard);
       newDeck = fixed.deck;
@@ -398,7 +698,7 @@ const SkyjoGame = () => {
         return;
       }
       card = newDeck.shift();
-      actionMsg = `${player.name} drew ${card}`;
+      actionMsg = `${player.name} drew a ${card}`;
     }
 
     let target = null;
@@ -417,7 +717,7 @@ const SkyjoGame = () => {
       newDiscard.push(card);
       const flip = hiddenCells[Math.floor(Math.random() * hiddenCells.length)];
       player.revealed[flip.i] = true;
-      actionMsg += ' and discarded it, flipping a hidden card.';
+      actionMsg += ` and discarded it, revealing a ${player.grid[flip.i]}.`;
     }
 
     const col = applyColumnRule(player.grid, player.revealed, newDiscard);
@@ -434,30 +734,37 @@ const SkyjoGame = () => {
     setMessage(actionMsg);
     playSound('flip');
 
-    let localF = fIdx;
-    let localTurns = turnsLeft;
-    if (localF === null && isFinished(player.grid, player.revealed)) {
-      localF = aiIdx;
-      localTurns = newPlayers.length - 1;
-      setFinisherIdx(localF);
-      setFinalTurnsLeft(localTurns);
-      setMessage(`${player.name} finished! Everyone else gets one last turn.`);
-    } else if (localF !== null) {
-      localTurns -= 1;
-      setFinalTurnsLeft(localTurns);
-    }
+    // Pause so you can see what the AI did before the turn moves on
+    setPausing(true);
+    if (pauseTimer.current) clearTimeout(pauseTimer.current);
+    pauseTimer.current = setTimeout(() => {
+      setPausing(false);
 
-    if (localF !== null && localTurns <= 0) {
-      endLocalRound(newPlayers, newDiscard, localF);
-      return;
-    }
+      let localF = fIdx;
+      let localTurns = turnsLeft;
+      if (localF === null && isFinished(player.grid, player.revealed)) {
+        localF = aiIdx;
+        localTurns = newPlayers.length - 1;
+        setFinisherIdx(localF);
+        setFinalTurnsLeft(localTurns);
+        setMessage(`${player.name} finished! Everyone else gets one last turn.`);
+      } else if (localF !== null) {
+        localTurns -= 1;
+        setFinalTurnsLeft(localTurns);
+      }
 
-    const nextIdx = (aiIdx + 1) % newPlayers.length;
-    setCurrentIdx(nextIdx);
-    playSound('turn');
-    if (newPlayers[nextIdx].isAI) {
-      scheduleAI(newPlayers, newDeck, newDiscard, nextIdx, localF, localTurns);
-    }
+      if (localF !== null && localTurns <= 0) {
+        endLocalRound(newPlayers, newDiscard, localF);
+        return;
+      }
+
+      const nextIdx = (aiIdx + 1) % newPlayers.length;
+      setCurrentIdx(nextIdx);
+      playSound('turn');
+      if (newPlayers[nextIdx].isAI) {
+        scheduleAI(newPlayers, newDeck, newDiscard, nextIdx, localF, localTurns);
+      }
+    }, PAUSE_MS);
   };
 
   const endLocalRound = (curPlayers, curDiscard, fIdx) => {
@@ -491,7 +798,7 @@ const SkyjoGame = () => {
     setMustReveal(false);
     setMessage(
       doubled
-        ? `${finalPlayers[fIdx].name} finished but didn't have the lowest score — points doubled!`
+        ? `${finalPlayers[fIdx].name} finished without the lowest score — points doubled!`
         : `${finalPlayers[fIdx].name} finished the round.`
     );
     setScreen(finalPlayers.some((p) => p.score >= 100) ? 'gameEnd' : 'roundEnd');
@@ -554,27 +861,24 @@ const SkyjoGame = () => {
     pollTimer.current = setInterval(() => refreshOnline(gid), 3500);
   };
 
-  // Turn notification when it becomes my turn online
   useEffect(() => {
     if (!isOnline || !mySeat) return;
     if (screen === 'playing' && currentIdx === mySeat.idx && prevTurnRef.current !== currentIdx) {
       playSound('turn');
       if (navigator.vibrate) navigator.vibrate(200);
-      document.title = '🎮 Your turn — Skyjo';
+      document.title = '🔵 Your turn — Skyjo';
     } else if (screen === 'playing') {
       document.title = 'Skyjo';
     }
     prevTurnRef.current = currentIdx;
   }, [currentIdx, screen, isOnline, mySeat, playSound]);
 
-  // Handle ?join= link on load
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const join = params.get('join');
     if (join) {
       setPlayMode('online');
       setJoinTargetId(join);
-      // Rejoin if we already have a seat saved
       const saved = localStorage.getItem(`skyjo_seat_${join}`);
       if (saved) {
         const seat = JSON.parse(saved);
@@ -589,6 +893,7 @@ const SkyjoGame = () => {
       if (unsubscribe.current) unsubscribe.current();
       if (pollTimer.current) clearInterval(pollTimer.current);
       if (aiTimer.current) clearTimeout(aiTimer.current);
+      if (pauseTimer.current) clearTimeout(pauseTimer.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -628,7 +933,6 @@ const SkyjoGame = () => {
       setGameId(joinTargetId);
       setMySeat(seat);
 
-      // If that was the last open seat, start the initial reveal phase
       const data = await fetchFullGame(joinTargetId);
       const stillOpen = data.players.some((p) => p.name === OPEN_SEAT);
       if (!stillOpen && data.game.status === 'lobby') {
@@ -654,11 +958,8 @@ const SkyjoGame = () => {
     playSound('flip');
     await updatePlayerRow(me.dbId, { revealed: newRevealed });
 
-    // If everyone now has 2 revealed, compute starter and begin
     const data = await fetchFullGame(gameId);
-    const allReady = data.players.every(
-      (p) => p.revealed.filter(Boolean).length >= 2
-    );
+    const allReady = data.players.every((p) => p.revealed.filter(Boolean).length >= 2);
     if (allReady && data.game.status === 'initialReveal') {
       let bestIdx = 0;
       let bestSum = -Infinity;
@@ -678,7 +979,7 @@ const SkyjoGame = () => {
   };
 
   const onlineDraw = async () => {
-    if (drawn || mustReveal || currentIdx !== mySeat.idx) return;
+    if (drawn || mustReveal || pausing || currentIdx !== mySeat.idx) return;
     const fixed = ensureDeck([...deck], [...discard]);
     if (fixed.deck.length === 0) return;
     const card = fixed.deck.shift();
@@ -694,7 +995,7 @@ const SkyjoGame = () => {
   };
 
   const onlineTakeDiscard = async () => {
-    if (drawn || mustReveal || currentIdx !== mySeat.idx || discard.length === 0) return;
+    if (drawn || mustReveal || pausing || currentIdx !== mySeat.idx || discard.length === 0) return;
     const newDiscard = [...discard];
     const card = newDiscard.pop();
     playSound('flip');
@@ -708,7 +1009,7 @@ const SkyjoGame = () => {
   };
 
   const onlineDiscardDrawn = async () => {
-    if (!drawn || drawn.source !== 'deck' || currentIdx !== mySeat.idx) return;
+    if (!drawn || drawn.source !== 'deck' || pausing || currentIdx !== mySeat.idx) return;
     playSound('flip');
     await updateStateRow(gameId, {
       discard: [...discard, drawn.card],
@@ -721,7 +1022,7 @@ const SkyjoGame = () => {
   };
 
   const onlineCellTap = async (cellIdx) => {
-    if (currentIdx !== mySeat.idx) return;
+    if (pausing || currentIdx !== mySeat.idx) return;
     const me = players[mySeat.idx];
     if (me.grid[cellIdx] === null) return;
 
@@ -729,13 +1030,16 @@ const SkyjoGame = () => {
     let revealed = [...me.revealed];
     let newDiscard = [...discard];
     let stateFields = {};
+    let flippedValue;
 
     if (mustReveal) {
       if (revealed[cellIdx]) return;
+      flippedValue = grid[cellIdx];
       revealed[cellIdx] = true;
       stateFields = { must_reveal: false };
     } else if (drawn) {
       newDiscard.push(grid[cellIdx]);
+      flippedValue = drawn.card;
       grid[cellIdx] = drawn.card;
       revealed[cellIdx] = true;
       stateFields = { drawn_card: null, drawn_source: null };
@@ -749,9 +1053,21 @@ const SkyjoGame = () => {
     revealed = col.revealed;
     if (col.removed) playSound('column');
 
+    // Write the flip immediately so everyone sees it, but hold the turn
+    // for a moment before advancing so the result is visible.
     await updatePlayerRow(me.dbId, { grid, revealed });
+    await updateStateRow(gameId, {
+      ...stateFields,
+      discard: newDiscard,
+      message:
+        `${me.name} ${mustReveal ? 'revealed' : 'played'} a ${flippedValue}.` +
+        (col.removed ? ' Column of three cleared!' : ''),
+    });
 
-    // Advance turn / finisher tracking
+    setPausing(true);
+    await new Promise((r) => setTimeout(r, PAUSE_MS));
+    setPausing(false);
+
     let fIdx = finisherIdx;
     let turns = finalTurnsLeft;
     let msg;
@@ -764,13 +1080,13 @@ const SkyjoGame = () => {
     }
 
     if (fIdx !== null && turns <= 0) {
-      await endOnlineRound(grid, revealed, newDiscard, fIdx, stateFields);
+      await endOnlineRound(grid, revealed, newDiscard, fIdx, {});
       return;
     }
 
     const nextIdx = (mySeat.idx + 1) % players.length;
     msg = msg || `${players[nextIdx].name}'s turn.`;
-    await updateStateRow(gameId, { ...stateFields, discard: newDiscard, message: msg });
+    await updateStateRow(gameId, { message: msg });
     await updateGameRow(gameId, {
       current_player_idx: nextIdx,
       finisher_idx: fIdx,
@@ -833,10 +1149,7 @@ const SkyjoGame = () => {
       for (const p of data.players) {
         const grid = newDeck.slice(deckIdx, deckIdx + CELLS);
         deckIdx += CELLS;
-        await updatePlayerRow(p.id, {
-          grid,
-          revealed: new Array(CELLS).fill(false),
-        });
+        await updatePlayerRow(p.id, { grid, revealed: new Array(CELLS).fill(false) });
       }
       const firstDiscard = newDeck[deckIdx];
       await updateStateRow(gameId, {
@@ -878,6 +1191,7 @@ const SkyjoGame = () => {
     if (unsubscribe.current) unsubscribe.current();
     if (pollTimer.current) clearInterval(pollTimer.current);
     if (aiTimer.current) clearTimeout(aiTimer.current);
+    if (pauseTimer.current) clearTimeout(pauseTimer.current);
     window.history.replaceState({}, '', window.location.pathname);
     document.title = 'Skyjo Card Game';
     setScreen('menu');
@@ -887,6 +1201,7 @@ const SkyjoGame = () => {
     setDiscard([]);
     setDrawn(null);
     setMustReveal(false);
+    setPausing(false);
     setRoundNumber(1);
     setFinisherIdx(null);
     setGameId(null);
@@ -896,210 +1211,70 @@ const SkyjoGame = () => {
   };
 
   /* ============================================================
-     UI
+     SCREENS
      ============================================================ */
-
-  const feltBg = {
-    background:
-      'radial-gradient(ellipse at 50% 30%, #2E3D24 0%, #212D19 60%, #17200F 100%)',
-    minHeight: '100vh',
-  };
-  const displayFont = { fontFamily: "'Grandstander', system-ui, sans-serif" };
-
-  const CardFace = ({ value, revealed, removed, onClick, disabled, highlight, size = 'md' }) => {
-    const sizes = {
-      md: 'w-14 h-20 md:w-16 md:h-24 text-2xl md:text-3xl',
-      sm: 'w-5 h-7 text-[9px]',
-    };
-    if (removed) {
-      return (
-        <div
-          className={`${sizes[size]} rounded-lg border border-dashed opacity-30`}
-          style={{ borderColor: '#E5DACB' }}
-        />
-      );
-    }
-    if (!revealed) {
-      return (
-        <button
-          onClick={onClick}
-          disabled={disabled}
-          className={`${sizes[size]} rounded-lg font-bold flex items-center justify-center transition-transform shadow-lg ${
-            !disabled ? 'hover:scale-105 active:scale-95 cursor-pointer' : ''
-          } ${highlight ? 'ring-2' : ''}`}
-          style={{
-            backgroundColor: '#E5DACB',
-            color: '#9C3F22',
-            backgroundImage:
-              'repeating-linear-gradient(45deg, transparent, transparent 6px, rgba(156,63,34,0.12) 6px, rgba(156,63,34,0.12) 12px)',
-            boxShadow: '0 3px 6px rgba(0,0,0,0.4)',
-            ...(highlight ? { boxShadow: '0 0 0 2px #C79057, 0 3px 6px rgba(0,0,0,0.4)' } : {}),
-          }}
-        >
-          {size === 'md' ? '✦' : ''}
-        </button>
-      );
-    }
-    return (
-      <button
-        onClick={onClick}
-        disabled={disabled}
-        className={`${sizes[size]} rounded-lg font-extrabold flex items-center justify-center transition-transform shadow-lg ${
-          !disabled ? 'hover:scale-105 active:scale-95 cursor-pointer' : ''
-        }`}
-        style={{
-          ...cardStyle(value),
-          boxShadow: '0 3px 6px rgba(0,0,0,0.4)',
-          ...displayFont,
-        }}
-      >
-        {value}
-      </button>
-    );
-  };
-
-  const PlayerGrid = ({ player, interactive, onCellTap, tapMode }) => (
-    <div className="flex justify-center gap-2 md:gap-3">
-      {Array.from({ length: COLS }).map((_, col) => (
-        <div key={col} className="flex flex-col gap-2 md:gap-3">
-          {Array.from({ length: ROWS }).map((_, row) => {
-            const idx = col * ROWS + row;
-            const removed = player.grid[idx] === null;
-            const revealed = player.revealed[idx];
-            let disabled = !interactive || removed;
-            if (interactive && tapMode === 'reveal' && revealed) disabled = true;
-            return (
-              <CardFace
-                key={idx}
-                value={player.grid[idx]}
-                revealed={revealed}
-                removed={removed}
-                disabled={disabled}
-                highlight={interactive && tapMode === 'reveal' && !revealed}
-                onClick={() => onCellTap && onCellTap(idx)}
-              />
-            );
-          })}
-        </div>
-      ))}
-    </div>
-  );
-
-  const MiniGrid = ({ player, active }) => (
-    <div
-      className="p-2 rounded-xl"
-      style={{
-        backgroundColor: 'rgba(252,251,249,0.07)',
-        outline: active ? '2px solid #C79057' : 'none',
-      }}
-    >
-      <p
-        className="text-xs font-bold mb-1 text-center truncate max-w-[110px]"
-        style={{ color: active ? '#C79057' : '#E5DACB' }}
-      >
-        {player.name} · {player.score}
-      </p>
-      <div className="flex gap-0.5 justify-center">
-        {Array.from({ length: COLS }).map((_, col) => (
-          <div key={col} className="flex flex-col gap-0.5">
-            {Array.from({ length: ROWS }).map((_, row) => {
-              const idx = col * ROWS + row;
-              return (
-                <CardFace
-                  key={idx}
-                  size="sm"
-                  value={player.grid[idx]}
-                  revealed={player.revealed[idx]}
-                  removed={player.grid[idx] === null}
-                  disabled
-                />
-              );
-            })}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-
-  const BrandButton = ({ onClick, children, color = '#9C3F22', textColor = '#FCFBF9', disabled }) => (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      className="w-full py-4 px-6 rounded-xl font-bold text-lg transition hover:opacity-90 active:scale-[0.98] disabled:opacity-40 shadow-lg"
-      style={{ backgroundColor: color, color: textColor, ...displayFont }}
-    >
-      {children}
-    </button>
-  );
-
-  const NameInput = ({ value, onChange, placeholder }) => (
-    <input
-      type="text"
-      value={value}
-      onChange={onChange}
-      placeholder={placeholder}
-      maxLength={16}
-      className="w-full py-3 px-4 rounded-xl font-semibold text-center outline-none"
-      style={{ backgroundColor: 'rgba(252,251,249,0.12)', color: '#FCFBF9' }}
-    />
-  );
 
   /* ---------- MENU ---------- */
   if (screen === 'menu') {
     return (
-      <div style={feltBg} className="flex items-center justify-center p-4">
-        <div className="text-center max-w-md w-full">
-          <h1
-            className="text-7xl font-black mb-2 tracking-tight"
-            style={{ color: '#E5DACB', ...displayFont, textShadow: '0 4px 12px rgba(0,0,0,0.5)' }}
-          >
-            SKYJO
-          </h1>
-          <div className="flex justify-center gap-1.5 mb-10">
-            {[-1, 3, 7, 11].map((v) => (
-              <div
-                key={v}
-                className="w-8 h-11 rounded-md font-extrabold text-sm flex items-center justify-center shadow-md"
-                style={{ ...cardStyle(v), transform: `rotate(${(v % 5) * 3 - 4}deg)` }}
-              >
-                {v}
-              </div>
-            ))}
+      <div style={pageStyle} className="flex items-center justify-center p-6">
+        <div className="text-center max-w-sm w-full">
+          <div className="flex justify-center mb-8" style={{ perspective: 600 }}>
+            {[7, -1, 11, 3].map((v, i) => {
+              const p = cardPalette(v);
+              return (
+                <div
+                  key={i}
+                  className="w-12 h-[68px] rounded-[10px] flex items-center justify-center font-bold text-xl -ml-3 first:ml-0"
+                  style={{
+                    background: `linear-gradient(160deg, ${p.light}, ${p.base} 55%, ${p.dark})`,
+                    color: p.text,
+                    transform: `rotate(${(i - 1.5) * 9}deg) translateY(${Math.abs(i - 1.5) * 4}px)`,
+                    boxShadow: '0 2px 4px rgba(0,0,0,0.15), 0 10px 24px rgba(0,0,0,0.15)',
+                    border: '1px solid rgba(0,0,0,0.08)',
+                    zIndex: i,
+                  }}
+                >
+                  {v}
+                </div>
+              );
+            })}
           </div>
+          <h1 className="text-5xl font-semibold tracking-tight mb-2" style={{ color: T.ink }}>
+            Skyjo
+          </h1>
+          <p className="text-[17px] mb-10" style={{ color: T.gray }}>
+            Lowest score wins. Game ends at 100.
+          </p>
 
-          <div className="space-y-4">
-            <BrandButton
-              color="#9C3F22"
+          <div className="space-y-3">
+            <Button
               onClick={() => {
                 setPlayMode('local');
                 setScreen('setup');
               }}
             >
               Pass & Play
-            </BrandButton>
-            <BrandButton
-              color="#688666"
+            </Button>
+            <Button
+              variant="secondary"
               onClick={() => {
                 setPlayMode('ai');
                 setScreen('setup');
               }}
             >
               Play vs AI
-            </BrandButton>
-            <BrandButton
-              color="#C79057"
-              textColor="#212D19"
+            </Button>
+            <Button
+              variant="secondary"
               onClick={() => {
                 setPlayMode('online');
                 setScreen('setup');
               }}
             >
               Online Multiplayer
-            </BrandButton>
+            </Button>
           </div>
-          <p className="mt-8 text-sm" style={{ color: '#688666' }}>
-            Lowest score wins · Game ends at 100 points
-          </p>
         </div>
       </div>
     );
@@ -1110,72 +1285,76 @@ const SkyjoGame = () => {
     const isAIMode = playMode === 'ai';
     const isOnlineMode = playMode === 'online';
     return (
-      <div style={feltBg} className="flex items-center justify-center p-4">
-        <div className="text-center max-w-md w-full">
-          <h2 className="text-3xl font-bold mb-8" style={{ color: '#E5DACB', ...displayFont }}>
-            {isAIMode ? 'You vs AI' : isOnlineMode ? 'Host an Online Game' : 'Pass & Play'}
+      <div style={pageStyle} className="flex items-center justify-center p-6">
+        <div className="max-w-sm w-full">
+          <h2 className="text-3xl font-semibold tracking-tight text-center mb-1" style={{ color: T.ink }}>
+            {isAIMode ? 'Play vs AI' : isOnlineMode ? 'Host a Game' : 'Pass & Play'}
           </h2>
+          <p className="text-center text-[15px] mb-8" style={{ color: T.gray }}>
+            {isAIMode
+              ? 'You against computer opponents.'
+              : isOnlineMode
+              ? 'Invite friends with a link.'
+              : 'Take turns on this device.'}
+          </p>
 
-          <div className="mb-8">
-            <label className="block text-lg font-semibold mb-3" style={{ color: '#E5DACB' }}>
-              {isAIMode
-                ? `You + ${playerCount - 1} AI opponent${playerCount > 2 ? 's' : ''}`
-                : `${playerCount} players total`}
-            </label>
-            <div className="flex justify-center gap-3 mb-6">
-              {[2, 3, 4].map((n) => (
-                <button
-                  key={n}
-                  onClick={() => setPlayerCount(n)}
-                  className="w-16 h-16 rounded-xl font-black text-2xl transition shadow-lg"
-                  style={{
-                    backgroundColor: playerCount === n ? '#C79057' : 'rgba(252,251,249,0.1)',
-                    color: playerCount === n ? '#212D19' : '#E5DACB',
-                    ...displayFont,
-                  }}
-                >
-                  {n}
-                </button>
-              ))}
-            </div>
+          <p className="text-[13px] font-semibold uppercase tracking-wide mb-2" style={{ color: T.gray }}>
+            Players
+          </p>
+          <div className="flex gap-2 mb-7">
+            {[2, 3, 4].map((n) => (
+              <button
+                key={n}
+                onClick={() => setPlayerCount(n)}
+                className="flex-1 py-3 rounded-xl font-semibold text-[17px] transition"
+                style={{
+                  backgroundColor: playerCount === n ? T.ink : '#FFFFFF',
+                  color: playerCount === n ? '#FFFFFF' : T.ink,
+                  border: `1px solid ${playerCount === n ? T.ink : T.hairline}`,
+                }}
+              >
+                {n}
+              </button>
+            ))}
+          </div>
 
-            {/* Name entry */}
-            <div className="space-y-3">
-              {isAIMode || isOnlineMode ? (
+          <p className="text-[13px] font-semibold uppercase tracking-wide mb-2" style={{ color: T.gray }}>
+            {isAIMode || isOnlineMode ? 'Your name' : 'Names'}
+          </p>
+          <div className="space-y-2.5 mb-8">
+            {isAIMode || isOnlineMode ? (
+              <NameInput
+                value={nameInputs[0]}
+                onChange={(e) => {
+                  const arr = [...nameInputs];
+                  arr[0] = e.target.value;
+                  setNameInputs(arr);
+                }}
+                placeholder="Your name"
+              />
+            ) : (
+              Array.from({ length: playerCount }).map((_, i) => (
                 <NameInput
-                  value={nameInputs[0]}
+                  key={i}
+                  value={nameInputs[i]}
                   onChange={(e) => {
                     const arr = [...nameInputs];
-                    arr[0] = e.target.value;
+                    arr[i] = e.target.value;
                     setNameInputs(arr);
                   }}
-                  placeholder="Your name"
+                  placeholder={`Player ${i + 1}`}
                 />
-              ) : (
-                Array.from({ length: playerCount }).map((_, i) => (
-                  <NameInput
-                    key={i}
-                    value={nameInputs[i]}
-                    onChange={(e) => {
-                      const arr = [...nameInputs];
-                      arr[i] = e.target.value;
-                      setNameInputs(arr);
-                    }}
-                    placeholder={`Player ${i + 1} name`}
-                  />
-                ))
-              )}
-            </div>
+              ))
+            )}
           </div>
 
           {errorMsg && (
-            <p className="mb-4 text-sm font-semibold" style={{ color: '#C79057' }}>
+            <p className="mb-4 text-sm font-medium text-center" style={{ color: '#D9302C' }}>
               {errorMsg}
             </p>
           )}
 
-          <BrandButton
-            color="#9C3F22"
+          <Button
             disabled={busy}
             onClick={() => {
               if (isOnlineMode) hostOnlineGame();
@@ -1183,11 +1362,11 @@ const SkyjoGame = () => {
             }}
           >
             {busy ? 'Setting up…' : isOnlineMode ? 'Create Game' : 'Deal Cards'}
-          </BrandButton>
+          </Button>
           <button
             onClick={resetGame}
-            className="mt-4 text-sm font-semibold underline"
-            style={{ color: '#688666' }}
+            className="mt-5 w-full text-[15px] font-medium"
+            style={{ color: T.accent }}
           >
             Back
           </button>
@@ -1196,16 +1375,16 @@ const SkyjoGame = () => {
     );
   }
 
-  /* ---------- JOIN (from a shared link) ---------- */
+  /* ---------- JOIN ---------- */
   if (screen === 'join') {
     return (
-      <div style={feltBg} className="flex items-center justify-center p-4">
-        <div className="text-center max-w-md w-full">
-          <h2 className="text-3xl font-bold mb-3" style={{ color: '#E5DACB', ...displayFont }}>
-            Join Skyjo Game
+      <div style={pageStyle} className="flex items-center justify-center p-6">
+        <div className="max-w-sm w-full text-center">
+          <h2 className="text-3xl font-semibold tracking-tight mb-1" style={{ color: T.ink }}>
+            Join Game
           </h2>
-          <p className="mb-8 font-semibold" style={{ color: '#688666' }}>
-            You've been invited to play!
+          <p className="text-[15px] mb-8" style={{ color: T.gray }}>
+            You've been invited to play Skyjo.
           </p>
           <div className="mb-6">
             <NameInput
@@ -1219,64 +1398,65 @@ const SkyjoGame = () => {
             />
           </div>
           {errorMsg && (
-            <p className="mb-4 text-sm font-semibold" style={{ color: '#C79057' }}>
+            <p className="mb-4 text-sm font-medium" style={{ color: '#D9302C' }}>
               {errorMsg}
             </p>
           )}
-          <BrandButton color="#9C3F22" disabled={busy} onClick={joinOnlineGame}>
+          <Button disabled={busy} onClick={joinOnlineGame}>
             {busy ? 'Joining…' : 'Join Game'}
-          </BrandButton>
+          </Button>
         </div>
       </div>
     );
   }
 
-  /* ---------- LOBBY (online) ---------- */
+  /* ---------- LOBBY ---------- */
   if (screen === 'lobby' && players.length > 0) {
     return (
-      <div style={feltBg} className="flex items-center justify-center p-4">
-        <div className="text-center max-w-md w-full">
-          <h2 className="text-3xl font-bold mb-2" style={{ color: '#E5DACB', ...displayFont }}>
-            Game Lobby
+      <div style={pageStyle} className="flex items-center justify-center p-6">
+        <div className="max-w-sm w-full text-center">
+          <h2 className="text-3xl font-semibold tracking-tight mb-1" style={{ color: T.ink }}>
+            Lobby
           </h2>
-          <p className="mb-6 font-semibold" style={{ color: '#688666' }}>
-            Waiting for everyone to join…
+          <p className="text-[15px] mb-8" style={{ color: T.gray }}>
+            The game starts when every seat is filled.
           </p>
 
-          <div className="space-y-3 mb-8">
+          <div
+            className="rounded-2xl overflow-hidden mb-6"
+            style={{ backgroundColor: T.panel, border: `1px solid #EBEBEE` }}
+          >
             {players.map((p, i) => (
               <div
                 key={i}
-                className="p-4 rounded-xl flex items-center justify-between"
-                style={{ backgroundColor: 'rgba(252,251,249,0.1)' }}
+                className="px-5 py-4 flex items-center justify-between"
+                style={{ borderTop: i > 0 ? `1px solid #F0F0F2` : 'none' }}
               >
-                <span className="font-bold" style={{ color: p.claimed ? '#E5DACB' : '#688666' }}>
+                <span
+                  className="text-[16px] font-medium"
+                  style={{ color: p.claimed ? T.ink : T.gray }}
+                >
                   {p.claimed ? p.name : 'Waiting for player…'}
-                  {mySeat && i === mySeat.idx ? ' (you)' : ''}
+                  {mySeat && i === mySeat.idx ? '  (you)' : ''}
                 </span>
                 <span
-                  className="w-3 h-3 rounded-full"
-                  style={{ backgroundColor: p.claimed ? '#688666' : 'rgba(252,251,249,0.2)' }}
+                  className="w-2.5 h-2.5 rounded-full"
+                  style={{ backgroundColor: p.claimed ? T.green : '#E5E5EA' }}
                 />
               </div>
             ))}
           </div>
 
-          <button
-            onClick={copyGameLink}
-            className="w-full py-4 px-6 rounded-xl font-bold text-lg flex items-center justify-center gap-2 shadow-lg"
-            style={{ backgroundColor: '#C79057', color: '#212D19', ...displayFont }}
-          >
-            {copied ? <Check size={20} /> : <Copy size={20} />}
-            {copied ? 'Link Copied!' : 'Copy Invite Link'}
-          </button>
-          <p className="mt-3 text-sm" style={{ color: '#688666' }}>
-            Send the link to your friends — the game starts when all seats are filled.
-          </p>
+          <Button variant="accent" onClick={copyGameLink}>
+            <span className="inline-flex items-center gap-2">
+              {copied ? <Check size={18} /> : <Copy size={18} />}
+              {copied ? 'Link Copied' : 'Copy Invite Link'}
+            </span>
+          </Button>
           <button
             onClick={resetGame}
-            className="mt-6 text-sm font-semibold underline"
-            style={{ color: '#688666' }}
+            className="mt-5 text-[15px] font-medium"
+            style={{ color: T.gray }}
           >
             Leave
           </button>
@@ -1292,22 +1472,24 @@ const SkyjoGame = () => {
       const myCount = me.revealed.filter(Boolean).length;
       const waiting = myCount >= 2;
       return (
-        <div style={feltBg} className="p-4 flex flex-col items-center justify-center">
-          <h2 className="text-2xl font-bold mb-1" style={{ color: '#C79057', ...displayFont }}>
+        <div style={pageStyle} className="p-5 flex flex-col items-center justify-center min-h-screen">
+          <h2 className="text-2xl font-semibold tracking-tight mb-1" style={{ color: T.ink }}>
             {me.name}
           </h2>
-          <p className="mb-6 font-semibold" style={{ color: '#E5DACB' }}>
+          <p className="mb-7 text-[15px]" style={{ color: T.gray }}>
             {waiting
-              ? 'Waiting for the other players to reveal…'
+              ? 'Waiting for the other players…'
               : `Tap ${2 - myCount} card${2 - myCount > 1 ? 's' : ''} to reveal`}
           </p>
-          <PlayerGrid
-            player={me}
-            interactive={!waiting}
-            tapMode="reveal"
-            onCellTap={onlineInitialReveal}
-          />
-          <div className="flex flex-wrap justify-center gap-2 mt-8">
+          <TableSurface>
+            <PlayerGrid
+              player={me}
+              interactive={!waiting}
+              tapMode="reveal"
+              onCellTap={onlineInitialReveal}
+            />
+          </TableSurface>
+          <div className="flex flex-wrap justify-center gap-2 mt-7">
             {players.map(
               (p, i) => i !== mySeat.idx && <MiniGrid key={i} player={p} active={false} />
             )}
@@ -1316,23 +1498,24 @@ const SkyjoGame = () => {
       );
     }
 
-    // Local
     const p = players[revealIdx];
     return (
-      <div style={feltBg} className="p-4 flex flex-col items-center justify-center">
-        <h2 className="text-2xl font-bold mb-1" style={{ color: '#C79057', ...displayFont }}>
+      <div style={pageStyle} className="p-5 flex flex-col items-center justify-center min-h-screen">
+        <h2 className="text-2xl font-semibold tracking-tight mb-1" style={{ color: T.ink }}>
           {p.name}
         </h2>
-        <p className="mb-6 font-semibold" style={{ color: '#E5DACB' }}>
+        <p className="mb-7 text-[15px]" style={{ color: T.gray }}>
           Tap {revealsLeft} card{revealsLeft > 1 ? 's' : ''} to reveal
         </p>
-        <PlayerGrid
-          player={p}
-          interactive={!p.isAI}
-          tapMode="reveal"
-          onCellTap={handleLocalInitialReveal}
-        />
-        <p className="mt-8 text-sm" style={{ color: '#688666' }}>
+        <TableSurface>
+          <PlayerGrid
+            player={p}
+            interactive={!p.isAI}
+            tapMode="reveal"
+            onCellTap={handleLocalInitialReveal}
+          />
+        </TableSurface>
+        <p className="mt-7 text-[13px]" style={{ color: T.gray }}>
           Highest revealed total starts the round.
         </p>
       </div>
@@ -1342,169 +1525,187 @@ const SkyjoGame = () => {
   /* ---------- PLAYING ---------- */
   if (screen === 'playing' && players.length > 0) {
     const activePlayer = players[currentIdx];
-    // Which grid do I see full-size?
     const viewIdx = isOnline && mySeat ? mySeat.idx : currentIdx;
     const viewPlayer = players[viewIdx];
     const isMyTurn = isOnline ? mySeat && currentIdx === mySeat.idx : !activePlayer.isAI;
-    const canPickPile = isMyTurn && !drawn && !mustReveal;
-    const canInteractGrid = isMyTurn && (drawn !== null || mustReveal);
+    const canPickPile = isMyTurn && !drawn && !mustReveal && !pausing;
+    const canInteractGrid = isMyTurn && !pausing && (drawn !== null || mustReveal);
     const tapMode = mustReveal ? 'reveal' : drawn ? 'swap' : null;
 
     return (
-      <div style={feltBg} className="p-3 md:p-6">
-        <div className="max-w-5xl mx-auto">
+      <div style={pageStyle} className="p-4 md:p-6 pb-10">
+        <div className="max-w-4xl mx-auto">
           {/* Header */}
-          <div className="flex justify-between items-center mb-4">
-            <h1 className="text-2xl md:text-3xl font-black" style={{ color: '#E5DACB', ...displayFont }}>
-              SKYJO{' '}
-              <span style={{ color: '#688666' }} className="text-lg font-bold">
-                · Round {roundNumber}
+          <div className="flex justify-between items-center mb-5">
+            <h1 className="text-xl font-semibold tracking-tight" style={{ color: T.ink }}>
+              Skyjo{' '}
+              <span className="font-normal" style={{ color: T.gray }}>
+                Round {roundNumber}
               </span>
             </h1>
             <div className="flex gap-2">
               {isOnline && (
                 <button
                   onClick={copyGameLink}
-                  className="p-2 rounded-lg"
-                  style={{ backgroundColor: '#C79057', color: '#212D19' }}
+                  className="w-9 h-9 rounded-full flex items-center justify-center"
+                  style={{ backgroundColor: '#FFFFFF', border: `1px solid ${T.hairline}`, color: T.ink }}
                 >
-                  {copied ? <Check size={18} /> : <Copy size={18} />}
+                  {copied ? <Check size={16} /> : <Copy size={16} />}
                 </button>
               )}
               <button
                 onClick={() => setSoundEnabled(!soundEnabled)}
-                className="p-2 rounded-lg"
-                style={{ backgroundColor: 'rgba(252,251,249,0.1)', color: '#E5DACB' }}
+                className="w-9 h-9 rounded-full flex items-center justify-center"
+                style={{ backgroundColor: '#FFFFFF', border: `1px solid ${T.hairline}`, color: T.ink }}
               >
-                {soundEnabled ? <Volume2 size={18} /> : <VolumeX size={18} />}
+                {soundEnabled ? <Volume2 size={16} /> : <VolumeX size={16} />}
               </button>
               <button
                 onClick={resetGame}
-                className="p-2 rounded-lg"
-                style={{ backgroundColor: 'rgba(252,251,249,0.1)', color: '#E5DACB' }}
+                className="w-9 h-9 rounded-full flex items-center justify-center"
+                style={{ backgroundColor: '#FFFFFF', border: `1px solid ${T.hairline}`, color: T.ink }}
               >
-                <RotateCcw size={18} />
+                <RotateCcw size={16} />
               </button>
             </div>
           </div>
 
-          {/* Opponents */}
-          <div className="flex flex-wrap justify-center gap-2 mb-4">
-            {players.map(
-              (p, i) => i !== viewIdx && <MiniGrid key={i} player={p} active={i === currentIdx} />
-            )}
-          </div>
+          {/* Scoreboard */}
+          <ScoreBoard players={players} currentIdx={currentIdx} />
 
-          {/* Turn banner */}
-          <div
-            className="text-center mb-4 py-2.5 px-4 rounded-xl font-bold shadow-lg"
-            style={{
-              backgroundColor: isMyTurn ? '#C79057' : 'rgba(229,218,203,0.15)',
-              color: isMyTurn ? '#212D19' : '#E5DACB',
-              ...displayFont,
-            }}
-          >
-            {isMyTurn
-              ? `${activePlayer.name} — your turn!`
-              : `Waiting on ${activePlayer.name}…`}
-            {finisherIdx !== null && (
-              <span className="block text-xs font-semibold mt-0.5">
-                Final turns — {players[finisherIdx].name} has finished!
-              </span>
-            )}
-          </div>
-
-          {/* Piles */}
-          <div className="flex justify-center items-start gap-8 mb-5">
-            <div className="text-center">
-              <button
-                onClick={handleDraw}
-                disabled={!canPickPile}
-                className={`w-16 h-24 rounded-lg font-bold flex items-center justify-center shadow-xl transition ${
-                  canPickPile ? 'hover:scale-105 cursor-pointer' : 'opacity-60'
-                }`}
-                style={{
-                  backgroundColor: '#E5DACB',
-                  color: '#9C3F22',
-                  backgroundImage:
-                    'repeating-linear-gradient(45deg, transparent, transparent 6px, rgba(156,63,34,0.12) 6px, rgba(156,63,34,0.12) 12px)',
-                }}
-              >
-                <span className="text-xl">✦</span>
-              </button>
-              <p className="text-xs mt-1.5 font-semibold" style={{ color: '#688666' }}>
-                Draw · {deck.length}
-              </p>
+          {/* Turn status */}
+          <div className="flex justify-center mb-5">
+            <div
+              className="px-5 py-2 rounded-full text-[15px] font-semibold inline-flex items-center gap-2"
+              style={{
+                backgroundColor: isMyTurn ? T.accent : '#FFFFFF',
+                color: isMyTurn ? '#FFFFFF' : T.ink,
+                border: isMyTurn ? '1px solid transparent' : `1px solid ${T.hairline}`,
+                boxShadow: isMyTurn ? '0 4px 14px rgba(0,113,227,0.3)' : 'none',
+              }}
+            >
+              {!isMyTurn && (
+                <span className="w-2 h-2 rounded-full animate-pulse" style={{ backgroundColor: T.green }} />
+              )}
+              {isMyTurn ? `${activePlayer.name} — your turn` : `${activePlayer.name} is playing…`}
             </div>
+          </div>
+          {finisherIdx !== null && (
+            <p className="text-center text-[13px] font-medium -mt-3 mb-4" style={{ color: '#D9302C' }}>
+              Final turns — {players[finisherIdx].name} has finished
+            </p>
+          )}
 
-            {drawn && (
+          {/* Table */}
+          <TableSurface>
+            {/* Piles */}
+            <div className="flex justify-center items-start gap-7 md:gap-10 mb-7">
               <div className="text-center">
-                <div
-                  className="w-16 h-24 rounded-lg font-extrabold text-3xl flex items-center justify-center shadow-xl animate-pulse"
-                  style={{ ...cardStyle(drawn.card), ...displayFont }}
+                <button
+                  onClick={handleDraw}
+                  disabled={!canPickPile}
+                  className={`w-[58px] h-[82px] rounded-[10px] relative transition ${
+                    canPickPile ? 'hover:-translate-y-0.5 cursor-pointer' : 'opacity-50'
+                  }`}
+                  style={{
+                    background: 'linear-gradient(165deg, #FFFFFF 0%, #F4F4F6 60%, #EBEBEF 100%)',
+                    border: '1px solid #E3E3E8',
+                    boxShadow:
+                      '0 1px 2px rgba(0,0,0,0.14), 0 6px 14px rgba(0,0,0,0.12), 2px 2px 0 #fff, 3px 3px 0 #ECECEF, 4px 4px 0 #fff',
+                  }}
                 >
-                  {drawn.card}
-                </div>
-                <p className="text-xs mt-1.5 font-semibold" style={{ color: '#C79057' }}>
-                  In hand
+                  <span className="absolute inset-0 flex items-center justify-center font-bold" style={{ color: '#2B3990', fontSize: 18 }}>
+                    ◆
+                  </span>
+                </button>
+                <p className="text-[12px] mt-2 font-medium tabular-nums" style={{ color: T.gray }}>
+                  Draw · {deck.length}
                 </p>
-                {drawn.source === 'deck' && isMyTurn && (
-                  <button
-                    onClick={handleDiscardDrawn}
-                    className="mt-1 px-3 py-1 rounded-lg text-xs font-bold"
-                    style={{ backgroundColor: '#688666', color: '#FCFBF9' }}
-                  >
-                    Discard it
-                  </button>
-                )}
               </div>
-            )}
 
-            <div className="text-center">
-              <button
-                onClick={handleTakeDiscard}
-                disabled={!canPickPile || discard.length === 0}
-                className={`w-16 h-24 rounded-lg font-extrabold text-3xl flex items-center justify-center shadow-xl transition ${
-                  canPickPile && discard.length > 0 ? 'hover:scale-105 cursor-pointer' : 'opacity-60'
-                }`}
-                style={
-                  discard.length > 0
-                    ? { ...cardStyle(discard[discard.length - 1]), ...displayFont }
-                    : {
-                        backgroundColor: 'rgba(252,251,249,0.08)',
-                        color: '#688666',
-                        border: '2px dashed #688666',
-                      }
-                }
-              >
-                {discard.length > 0 ? discard[discard.length - 1] : '–'}
-              </button>
-              <p className="text-xs mt-1.5 font-semibold" style={{ color: '#688666' }}>
-                Discard
-              </p>
+              {drawn && (
+                <div className="text-center">
+                  <div
+                    className="w-[58px] h-[82px] rounded-[10px] relative flex items-center justify-center font-bold text-3xl"
+                    style={{
+                      background: `linear-gradient(160deg, ${cardPalette(drawn.card).light}, ${cardPalette(drawn.card).base} 55%, ${cardPalette(drawn.card).dark})`,
+                      color: cardPalette(drawn.card).text,
+                      border: '1px solid rgba(0,0,0,0.08)',
+                      boxShadow: `0 0 0 3px rgba(0,113,227,0.4), 0 8px 20px rgba(0,0,0,0.18)`,
+                      textShadow: '0 1px 1px rgba(0,0,0,0.15)',
+                    }}
+                  >
+                    {drawn.card}
+                  </div>
+                  <p className="text-[12px] mt-2 font-semibold" style={{ color: T.accent }}>
+                    In hand
+                  </p>
+                  {drawn.source === 'deck' && isMyTurn && !pausing && (
+                    <button
+                      onClick={handleDiscardDrawn}
+                      className="mt-1 px-3.5 py-1.5 rounded-full text-[12px] font-semibold"
+                      style={{ backgroundColor: T.ink, color: '#FFFFFF' }}
+                    >
+                      Discard it
+                    </button>
+                  )}
+                </div>
+              )}
+
+              <div className="text-center">
+                <button
+                  onClick={handleTakeDiscard}
+                  disabled={!canPickPile || discard.length === 0}
+                  className={`w-[58px] h-[82px] rounded-[10px] relative flex items-center justify-center font-bold text-3xl transition ${
+                    canPickPile && discard.length > 0
+                      ? 'hover:-translate-y-0.5 cursor-pointer'
+                      : 'opacity-50'
+                  }`}
+                  style={
+                    discard.length > 0
+                      ? {
+                          background: `linear-gradient(160deg, ${cardPalette(discard[discard.length - 1]).light}, ${cardPalette(discard[discard.length - 1]).base} 55%, ${cardPalette(discard[discard.length - 1]).dark})`,
+                          color: cardPalette(discard[discard.length - 1]).text,
+                          border: '1px solid rgba(0,0,0,0.08)',
+                          boxShadow: '0 1px 2px rgba(0,0,0,0.14), 0 6px 14px rgba(0,0,0,0.12)',
+                          textShadow: '0 1px 1px rgba(0,0,0,0.15)',
+                        }
+                      : {
+                          backgroundColor: 'rgba(0,0,0,0.02)',
+                          color: T.hairline,
+                          border: `1.5px dashed ${T.hairline}`,
+                        }
+                  }
+                >
+                  {discard.length > 0 ? discard[discard.length - 1] : ''}
+                </button>
+                <p className="text-[12px] mt-2 font-medium" style={{ color: T.gray }}>
+                  Discard
+                </p>
+              </div>
             </div>
-          </div>
 
-          {/* Main grid */}
-          <p className="text-center text-sm font-bold mb-2" style={{ color: '#C79057' }}>
-            {viewPlayer.name}
-            {isOnline ? ' (you)' : ''} · {viewPlayer.score} pts
-          </p>
-          <PlayerGrid
-            player={viewPlayer}
-            interactive={canInteractGrid && viewIdx === currentIdx}
-            tapMode={tapMode}
-            onCellTap={handleCellTap}
-          />
+            {/* Main grid */}
+            <p className="text-center text-[13px] font-semibold mb-3" style={{ color: T.ink }}>
+              {viewPlayer.name}
+              {isOnline ? ' (you)' : ''}
+              <span className="font-medium" style={{ color: T.gray }}>
+                {' '}
+                · showing {revealedSum(viewPlayer)}
+              </span>
+            </p>
+            <PlayerGrid
+              player={viewPlayer}
+              interactive={canInteractGrid && viewIdx === currentIdx}
+              tapMode={tapMode}
+              onCellTap={handleCellTap}
+            />
+          </TableSurface>
 
           {/* Message */}
-          <div
-            className="mt-5 p-3 rounded-xl text-center text-sm font-semibold"
-            style={{ backgroundColor: 'rgba(252,251,249,0.08)', color: '#E5DACB' }}
-          >
-            {message ||
-              (canPickPile ? 'Draw from the pile or take the discard.' : '')}
-          </div>
+          <p className="mt-5 text-center text-[14px] font-medium min-h-[20px]" style={{ color: T.gray }}>
+            {message || (canPickPile ? 'Draw from the pile or take the discard.' : '')}
+          </p>
         </div>
       </div>
     );
@@ -1515,37 +1716,32 @@ const SkyjoGame = () => {
     const gameOver = screen === 'gameEnd';
     const sorted = [...players].sort((a, b) => a.score - b.score);
     return (
-      <div style={feltBg} className="flex items-center justify-center p-4">
-        <div className="text-center max-w-lg w-full">
-          <h2 className="text-4xl font-black mb-2" style={{ color: '#E5DACB', ...displayFont }}>
-            {gameOver ? `${sorted[0].name} Wins!` : `Round ${roundNumber} Complete`}
+      <div style={pageStyle} className="flex items-center justify-center p-6">
+        <div className="max-w-sm w-full text-center">
+          <h2 className="text-3xl font-semibold tracking-tight mb-1" style={{ color: T.ink }}>
+            {gameOver ? `${sorted[0].name} wins` : `Round ${roundNumber} complete`}
           </h2>
-          <p className="mb-8 font-semibold" style={{ color: '#688666' }}>
+          <p className="text-[15px] mb-8" style={{ color: T.gray }}>
             {message}
           </p>
 
-          <div className="space-y-3 mb-8">
+          <div
+            className="rounded-2xl overflow-hidden mb-8 text-left"
+            style={{ backgroundColor: T.panel, border: '1px solid #EBEBEE' }}
+          >
             {sorted.map((p, rank) => (
               <div
                 key={rank}
-                className="p-4 rounded-xl flex justify-between items-center shadow-lg"
-                style={{
-                  backgroundColor: gameOver && rank === 0 ? '#C79057' : 'rgba(252,251,249,0.1)',
-                }}
+                className="px-5 py-4 flex items-center justify-between"
+                style={{ borderTop: rank > 0 ? '1px solid #F0F0F2' : 'none' }}
               >
-                <span
-                  className="font-bold"
-                  style={{ color: gameOver && rank === 0 ? '#212D19' : '#E5DACB' }}
-                >
-                  {gameOver && rank === 0 ? '🏆 ' : ''}
+                <span className="text-[16px] font-medium flex items-center gap-2" style={{ color: T.ink }}>
+                  {gameOver && rank === 0 && '🏆'}
                   {p.name}
                 </span>
-                <span
-                  className="font-black text-xl"
-                  style={{ color: gameOver && rank === 0 ? '#212D19' : '#C79057', ...displayFont }}
-                >
+                <span className="text-[16px] font-semibold tabular-nums" style={{ color: T.ink }}>
                   {p.roundScores.length > 0 && (
-                    <span className="text-sm font-bold mr-2" style={{ color: '#688666' }}>
+                    <span className="text-[13px] font-medium mr-2" style={{ color: T.gray }}>
                       +{p.roundScores[p.roundScores.length - 1]}
                     </span>
                   )}
@@ -1556,23 +1752,20 @@ const SkyjoGame = () => {
           </div>
 
           {!gameOver && (
-            <BrandButton
-              color="#9C3F22"
-              disabled={busy}
-              onClick={() => (isOnline ? startNextOnlineRound() : dealLocalRound(players, roundNumber + 1))}
-            >
-              {busy ? 'Dealing…' : 'Next Round'}
-            </BrandButton>
+            <div className="mb-3">
+              <Button
+                disabled={busy}
+                onClick={() =>
+                  isOnline ? startNextOnlineRound() : dealLocalRound(players, roundNumber + 1)
+                }
+              >
+                {busy ? 'Dealing…' : 'Next Round'}
+              </Button>
+            </div>
           )}
-          <div className="mt-4">
-            <BrandButton
-              color={gameOver ? '#9C3F22' : '#3E4A38'}
-              textColor={gameOver ? '#FCFBF9' : '#E5DACB'}
-              onClick={resetGame}
-            >
-              {gameOver ? 'Play Again' : 'End Game'}
-            </BrandButton>
-          </div>
+          <Button variant={gameOver ? 'primary' : 'secondary'} onClick={resetGame}>
+            {gameOver ? 'Play Again' : 'End Game'}
+          </Button>
         </div>
       </div>
     );

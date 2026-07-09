@@ -102,30 +102,42 @@ export const joinGame = async (gameId) => {
 
 export const subscribeToGame = (gameId, callback) => {
   const gameSubscription = supabase
-    .from(`games:id=eq.${gameId}`)
-    .on('*', (payload) => {
-      callback({ type: 'game', data: payload.new });
-    })
+    .channel(`games:${gameId}`)
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'games', filter: `id=eq.${gameId}` },
+      (payload) => {
+        callback({ type: 'game', data: payload.new });
+      }
+    )
     .subscribe();
 
   const playersSubscription = supabase
-    .from(`game_players:game_id=eq.${gameId}`)
-    .on('*', (payload) => {
-      callback({ type: 'players', data: payload.new });
-    })
+    .channel(`players:${gameId}`)
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'game_players', filter: `game_id=eq.${gameId}` },
+      (payload) => {
+        callback({ type: 'players', data: payload.new });
+      }
+    )
     .subscribe();
 
   const stateSubscription = supabase
-    .from(`game_state:game_id=eq.${gameId}`)
-    .on('*', (payload) => {
-      callback({ type: 'state', data: payload.new });
-    })
+    .channel(`state:${gameId}`)
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'game_state', filter: `game_id=eq.${gameId}` },
+      (payload) => {
+        callback({ type: 'state', data: payload.new });
+      }
+    )
     .subscribe();
 
   return () => {
-    gameSubscription.unsubscribe();
-    playersSubscription.unsubscribe();
-    stateSubscription.unsubscribe();
+    supabase.removeChannel(gameSubscription);
+    supabase.removeChannel(playersSubscription);
+    supabase.removeChannel(stateSubscription);
   };
 };
 
